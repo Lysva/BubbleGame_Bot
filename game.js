@@ -1,3 +1,26 @@
+document.addEventListener('DOMContentLoaded', function() {
+    // Проверяем, что игра запущена в Telegram
+    if (window.Telegram && Telegram.WebApp) {
+        const tgWebApp = Telegram.WebApp;
+
+        // Развернуть на весь экран
+        tgWebApp.expand();
+
+        // Получаем данные пользователя
+        const user = tgWebApp.initDataUnsafe.user;
+        if (user) {
+            console.log("Пользователь Telegram:", user);
+            // Можно сохранить user.id для таблицы лидеров
+        }
+
+        // Обработка закрытия игры
+        tgWebApp.onEvent('viewportChanged', (event) => {
+            if (event.isStateStable) {
+                console.log("Игра закрывается");
+            }
+        });
+    }
+});
 // Game Configuration
 const config = {
     roundTime: 5 * 60 * 1000,
@@ -81,4 +104,19 @@ function initGameEnvironment() {
     initControls();
     window.addEventListener('resize', resizeCanvas);
     console.log("Game environment ready");
+}
+function addTelegramShareButton(score) {
+    if (window.Telegram && Telegram.WebApp) {
+        const shareBtn = document.createElement('button');
+        shareBtn.textContent = 'Поделиться результатом ★' + score;
+        shareBtn.className = 'btn';
+        shareBtn.onclick = () => {
+            Telegram.WebApp.share({
+                title: 'Я набрал ' + score + ' очков в Star Eater!',
+                text: 'Попробуй побить мой рекорд!',
+                url: 'https://ваш-сайт.com'
+            });
+        };
+        document.body.appendChild(shareBtn);
+    }
 }
