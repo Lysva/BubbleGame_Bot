@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Star Eater Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial; }
+        #game-canvas { display: block; background: #1a1a2e; touch-action: none; }
+        #menu {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center;
+            align-items: center; background: rgba(0,0,0,0.8); z-index: 100;
+            color: white;
+        }
+        .btn {
+            padding: 15px 30px; margin: 10px; font-size: 18px;
+            background: #4CAF50; color: white; border: none;
+            border-radius: 5px; cursor: pointer; min-width: 200px;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: scale(1.05); }
+        #ui { 
+            position: absolute; top: 10px; left: 10px; 
+            color: white; text-shadow: 1px 1px 3px black;
+            font-size: 18px; font-weight: bold;
+        }
+        #leaderboard {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            z-index: 101;
+            display: none;
+            max-width: 80%;
+        }
+        h1 { color: #4CAF50; margin-bottom: 30px; text-shadow: 0 0 10px rgba(76, 175, 80, 0.7); }
+    </style>
+</head>
+<body>
+    <canvas id="game-canvas"></canvas>
+    <div id="ui">
+        <div id="score">★ 0</div>
+        <div id="time">⏱ 05:00</div>
+        <div id="level" style="display: none;">🌠 Level 1</div>
+        <div id="players-count" style="display: none;">👥 1/20</div>
+    </div>
+    <div id="menu">
+        <h1>Star Eater</h1>
+        <button id="multiplayer-btn" class="btn">Multiplayer</button>
+        <button id="company-btn" class="btn">Galaxy Mode</button>
+    </div>
+    <div id="leaderboard">
+        <h2>Round Results</h2>
+        <div id="round-scores"></div>
+        <h2>All-Time Best</h2>
+        <div id="alltime-scores"></div>
+        <button id="continue-btn" class="btn">Continue</button>
+    </div>
+    <script>
+        // ГАРАНТИРОВАННО РАБОТАЮЩИЕ КНОПКИ
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Game initialization started');
+            
+            const multiplayerBtn = document.getElementById('multiplayer-btn');
+            const companyBtn = document.getElementById('company-btn');
+            const continueBtn = document.getElementById('continue-btn');
+
+            // Проверка существования кнопок
+            if (!multiplayerBtn || !companyBtn || !continueBtn) {
+                console.error('Some buttons are missing!');
+                return;
+            }
+
+            // Назначение обработчиков
+            multiplayerBtn.addEventListener('click', startMultiplayer);
+            companyBtn.addEventListener('click', startGalaxyMode);
+            continueBtn.addEventListener('click', continueGame);
+
+            console.log('All buttons initialized successfully');
+            initGameEnvironment();
+        });
+
+        function startMultiplayer() {
+            console.log('Starting multiplayer mode');
+            initGame('multiplayer');
+        }
+
+        function startGalaxyMode() {
+            console.log('Starting galaxy mode');
+            initGame('company');
+        }
+
+        function continueGame() {
+            console.log('Continuing game');
+            document.getElementById('leaderboard').style.display = 'none';
+            if (gameState.gameMode === 'company' && gameState.currentLevel < config.levels.length - 1) {
+                gameState.currentLevel++;
+                initGame('company');
+            } else {
+                document.getElementById('menu').style.display = 'flex';
+            }
+        }
+
+        // КОНФИГУРАЦИЯ ИГРЫ
+        const config = {
+            roundTime: 5 * 60 * 1000, // 2 минуты
+            mapSize: { width: 5000, height: 5000 },
+            initialPlayerSize: 20,
+            foodSize: 8,
+            botCount: 50,
+            maxPlayers: 20,
+            playerSpeed: 5,
+            joystickRadius: 150,
+            foodSpawnRate: 0.3,
+            levels: [
+                { botSpeed: 1, botScoreMultiplier: 1 },
+                { botSpeed: 1.2, botScoreMultiplier: 1.2 },
+                { botSpeed: 1.5, botScoreMultiplier: 1.5 },
+                { botSpeed: 1.8, botScoreMultiplier: 1.8 },
+                { botSpeed: 2.2, botScoreMultiplier: 2.2 }
+            ]
+        };
+
+        // СОСТОЯНИЕ ИГРЫ
+        let gameState = {
+            players: {},
+            foods: [],
+            bots: [],
+            roundEndTime: 0,
+            currentLevel: 0,
+            gameMode: null,
+            keysPressed: {},
+            joystick: {
+                active: false,
+                startX: 0,
+                startY: 0,
+                moveX: 0,
+                moveY: 0
+            }
+        };
+
+        let allTimeScores = JSON.parse(localStorage.getItem('starEaterScores')) || [];
+        let currentRoundScores = [];
+
+        // DOM ЭЛЕМЕНТЫ
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const uiScore = document.getElementById('score');
+        const uiTime = document.getElementById('time');
+        const uiLevel = document.getElementById('level');
+        const uiPlayers = document.getElementById('players-count');
+        const menu = document.getElementById('menu');
+        const leaderboard = document.getElementById('leaderboard');
+        const roundScores = document.getElementById('round-scores');
+        const alltimeScores = document.getElementById('alltime-scores');
+
+        function initGameEnvironment() {
+            console.log('Initializing game environment');
+            resizeCanvas();
+            initControls();
+            window.addEventListener('resize', resizeCanvas);
+        }
+
+        function initGame(mode) {
+            console.log(`Initializing ${mode} game`);
+            
+            gameState = {
+                players: {},
+                foods: [],
+                bots: [],
+                roundEndTime: Date.now() + config.roundTime,
+                currentLevel: mode === 'company' ? gameState.currentLevel || 0 : 0,
+                gameMode: mode,
+                keysPressed: {},
+                joystick: {
+                    active: false,
+                    startX: 0,
+                    startY: 0,
+                    moveX: 0,
+                    moveY: 0
+                }
+            };
+
+            generateFood(50);
+            
+            if (mode === 'company') {
+                generateBots();
+                uiLevel.style.display = 'block';
+                uiLevel.textContent = `🌠 Level ${gameState.currentLevel + 1}`;
+                uiPlayers.style.display = 'none';
+            } else {
+                uiLevel.style.display = 'none';
+                uiPlayers.style.display = 'block';
+                updatePlayersCount(1);
+                for (let i = 1; i <= 5; i++) {
+                    addPlayer(`bot_${i}`, true);
+                }
+            }
+            
+            addPlayer('player1');
+            menu.style.display = 'none';
+            leaderboard.style.display = 'none';
+            
+            gameLoop();
+        }
+
+        function generateFood(count) {
+            for (let i = 0; i < count; i++) {
+                gameState.foods.push({
+                    x: Math.random() * config.mapSize.width,
+                    y: Math.random() * config.mapSize.height,
+                    size: config.foodSize,
+                    color: getRandomStarColor(),
+                    rotation: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        function generateBots() {
+            const level = config.levels[gameState.currentLevel];
+            for (let i = 0; i < config.botCount; i++) {
+                gameState.bots.push({
+                    id: 'bot_' + i,
+                    x: Math.random() * config.mapSize.width,
+                    y: Math.random() * config.mapSize.height,
+                    size: config.initialPlayerSize,
+                    color: getRandomColor(),
+                    score: 0,
+                    target: { 
+                        x: Math.random() * config.mapSize.width,
+                        y: Math.random() * config.mapSize.height 
+                    },
+                    speed: level.botSpeed,
+                    updateTarget: function() {
+                        this.target = {
+                            x: Math.random() * config.mapSize.width,
+                            y: Math.random() * config.mapSize.height
+                        };
+                    }
+                });
+            }
+        }
+
+        function addPlayer(id, isBot = false) {
+            gameState.players[id] = {
+                id: id,
+                x: config.mapSize.width / 2,
+                y: config.mapSize.height / 2,
+                size: config.initialPlayerSize,
+                color: isBot ? getRandomColor() : '#4CAF50',
+                score: 0,
+                isBot: isBot
+            };
+        }
+
+        function initControls() {
+            window.addEventListener('keydown', (e) => {
+                if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+                    gameState.keysPressed[e.key] = true;
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+                    gameState.keysPressed[e.key] = false;
+                }
+            });
+            
+            canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+            canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+            canvas.addEventListener('touchend', handleTouchEnd);
+        }
+
+        function handleTouchStart(e) {
+            const rect = canvas.getBoundingClientRect();
+            gameState.joystick.active = true;
+            gameState.joystick.startX = e.touches[0].clientX - rect.left;
+            gameState.joystick.startY = e.touches[0].clientY - rect.top;
+            e.preventDefault();
+        }
+
+        function handleTouchMove(e) {
+            if (!gameState.joystick.active) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const touchX = e.touches[0].clientX - rect.left;
+            const touchY = e.touches[0].clientY - rect.top;
+            
+            gameState.joystick.moveX = touchX - gameState.joystick.startX;
+            gameState.joystick.moveY = touchY - gameState.joystick.startY;
+            
+            const length = Math.sqrt(gameState.joystick.moveX ** 2 + gameState.joystick.moveY ** 2);
+            if (length > 0) {
+                gameState.joystick.moveX = (gameState.joystick.moveX / length) * config.playerSpeed;
+                gameState.joystick.moveY = (gameState.joystick.moveY / length) * config.playerSpeed;
+            }
+            
+            e.preventDefault();
+        }
+
+        function handleTouchEnd() {
+            gameState.joystick.active = false;
+            gameState.joystick.moveX = 0;
+            gameState.joystick.moveY = 0;
+        }
+
+        function gameLoop() {
+            if (checkTime()) return;
+            
+            update();
+            render();
+            
+            const timeLeft = gameState.roundEndTime - Date.now();
+            const timePercent = timeLeft / config.roundTime;
+            const spawnChance = config.foodSpawnRate * timePercent;
+            
+            if (Math.random() < spawnChance && gameState.foods.length < 100) {
+                generateFood(1);
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        function checkTime() {
+            const timeLeft = gameState.roundEndTime - Date.now();
+            if (timeLeft <= 0) {
+                endRound();
+                return true;
+            }
+            return false;
+        }
+
+        function update() {
+            const player = gameState.players['player1'];
+            if (!player) return;
+            
+            if (gameState.keysPressed['ArrowUp']) player.y -= config.playerSpeed;
+            if (gameState.keysPressed['ArrowDown']) player.y += config.playerSpeed;
+            if (gameState.keysPressed['ArrowLeft']) player.x -= config.playerSpeed;
+            if (gameState.keysPressed['ArrowRight']) player.x += config.playerSpeed;
+            
+            if (gameState.joystick.active) {
+                player.x += gameState.joystick.moveX;
+                player.y += gameState.joystick.moveY;
+            }
+            
+            if (gameState.gameMode === 'company') {
+                updateBots();
+            }
+            
+            player.x = Math.max(player.size, Math.min(config.mapSize.width - player.size, player.x));
+            player.y = Math.max(player.size, Math.min(config.mapSize.height - player.size, player.y));
+            
+            checkCollisions();
+            
+            if (gameState.gameMode === 'multiplayer') {
+                updatePlayersCount(1 + Math.floor(Math.random() * 15));
+            }
+        }
+
+        function updateBots() {
+            const player = gameState.players['player1'];
+            if (!player) return;
+
+            gameState.bots.forEach(bot => {
+                if (bot.size < player.size * 0.9) {
+                    const dx = bot.x - player.x;
+                    const dy = bot.y - player.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist < 500) {
+                        bot.target = {
+                            x: bot.x + dx/dist * 200,
+                            y: bot.y + dy/dist * 200
+                        };
+                    } else {
+                        findFoodTarget(bot);
+                    }
+                } 
+                else if (bot.size > player.size * 1.1) {
+                    bot.target = {
+                        x: player.x,
+                        y: player.y
+                    };
+                } 
+                else {
+                    findFoodOrSmallerTarget(bot);
+                }
+
+                const dx = bot.target.x - bot.x;
+                const dy = bot.target.y - bot.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist > 10) {
+                    bot.x += (dx / dist) * bot.speed;
+                    bot.y += (dy / dist) * bot.speed;
+                } else if (bot.updateTarget) {
+                    bot.updateTarget();
+                }
+
+                if (Math.random() < 0.005) {
+                    bot.score += 1 * config.levels[gameState.currentLevel].botScoreMultiplier;
+                    bot.size = config.initialPlayerSize + Math.sqrt(bot.score) * 2;
+                }
+            });
+        }
+
+        function findFoodTarget(bot) {
+            let closestFood = null;
+            let minDist = Infinity;
+            
+            gameState.foods.forEach(food => {
+                const dist = Math.hypot(food.x - bot.x, food.y - bot.y);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestFood = food;
+                }
+            });
+            
+            if (closestFood) {
+                bot.target = {
+                    x: closestFood.x,
+                    y: closestFood.y
+                };
+            } else if (bot.updateTarget) {
+                bot.updateTarget();
+            }
+        }
+
+        function findFoodOrSmallerTarget(bot) {
+            let target = null;
+            let minDist = Infinity;
+            
+            gameState.bots.forEach(otherBot => {
+                if (otherBot !== bot && otherBot.size < bot.size * 0.9) {
+                    const dist = Math.hypot(otherBot.x - bot.x, otherBot.y - bot.y);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        target = otherBot;
+                    }
+                }
+            });
+            
+            if (!target) {
+                findFoodTarget(bot);
+                return;
+            }
+            
+            bot.target = {
+                x: target.x,
+                y: target.y
+            };
+        }
+
+        function checkCollisions() {
+            const player = gameState.players['player1'];
+            
+            for (let i = gameState.foods.length - 1; i >= 0; i--) {
+                const food = gameState.foods[i];
+                const dist = Math.hypot(food.x - player.x, food.y - player.y);
+                if (dist < player.size) {
+                    player.score++;
+                    player.size = config.initialPlayerSize + Math.sqrt(player.score) * 2;
+                    gameState.foods.splice(i, 1);
+                }
+            }
+            
+            const allEntities = [...gameState.bots, ...Object.values(gameState.players)];
+            
+            for (let i = allEntities.length - 1; i >= 0; i--) {
+                const entity = allEntities[i];
+                if (entity === player) continue;
+                
+                const dist = Math.hypot(entity.x - player.x, entity.y - player.y);
+                const sizeDiff = player.size - entity.size;
+                
+                if (dist < player.size && sizeDiff > player.size * 0.1) {
+                    player.score += entity.score || 1;
+                    player.size = config.initialPlayerSize + Math.sqrt(player.score) * 2;
+                    
+                    if (gameState.bots.includes(entity)) {
+                        gameState.bots.splice(gameState.bots.indexOf(entity), 1);
+                    } else if (gameState.players[entity.id]) {
+                        delete gameState.players[entity.id];
+                    }
+                }
+                else if (dist < entity.size && sizeDiff < -entity.size * 0.1) {
+                    endGame();
+                    return;
+                }
+            }
+        }
+
+        function render() {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const player = gameState.players['player1'];
+            if (!player) return;
+            
+            const viewX = player.x - canvas.width / 2;
+            const viewY = player.y - canvas.height / 2;
+            
+            ctx.save();
+            ctx.translate(-viewX, -viewY);
+            
+            gameState.foods.forEach(food => {
+                drawStar(ctx, food.x, food.y, food.size, food.color, food.rotation);
+                food.rotation += 0.02;
+            });
+            
+            gameState.bots.forEach(bot => {
+                ctx.beginPath();
+                ctx.arc(bot.x, bot.y, bot.size, 0, Math.PI * 2);
+                ctx.fillStyle = bot.color;
+                ctx.fill();
+                
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(
+                    bot.x - bot.size/3, 
+                    bot.y - bot.size/3, 
+                    bot.size/5, 0, Math.PI * 2
+                );
+                ctx.fill();
+            });
+            
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+            ctx.fillStyle = player.color;
+            ctx.fill();
+            
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(
+                player.x, 
+                player.y + player.size/4, 
+                player.size/2, 0.1 * Math.PI, 0.9 * Math.PI
+            );
+            ctx.stroke();
+            
+            ctx.restore();
+            
+            uiScore.textContent = `★ ${player.score}`;
+            const timeLeft = Math.max(0, gameState.roundEndTime - Date.now());
+            const mins = Math.floor(timeLeft / 60000).toString().padStart(2, '0');
+            const secs = Math.floor((timeLeft % 60000) / 1000).toString().padStart(2, '0');
+            uiTime.textContent = `⏱ ${mins}:${secs}`;
+            
+            if (gameState.gameMode === 'company') {
+                uiLevel.textContent = `🌠 Level ${gameState.currentLevel + 1}`;
+            }
+        }
+
+        function drawStar(ctx, x, y, size, color, rotation) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rotation);
+            ctx.fillStyle = color;
+            
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                const angle = (i * 2 * Math.PI / 5) - Math.PI/2;
+                const nextAngle = ((i + 1) * 2 * Math.PI / 5) - Math.PI/2;
+                
+                ctx.lineTo(
+                    Math.cos(angle) * size,
+                    Math.sin(angle) * size
+                );
+                
+                ctx.lineTo(
+                    Math.cos(angle + Math.PI/5) * size/2,
+                    Math.sin(angle + Math.PI/5) * size/2
+                );
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function updatePlayersCount(count) {
+            uiPlayers.textContent = `👥 ${count}/${config.maxPlayers}`;
+        }
+
+        function endRound() {
+            const player = gameState.players['player1'];
+            if (!player) return;
+
+            currentRoundScores = [{
+                name: 'You',
+                score: player.score,
+                level: gameState.currentLevel + 1
+            }];
+
+            if (gameState.gameMode === 'multiplayer') {
+                Object.values(gameState.players).forEach(p => {
+                    if (p.id !== 'player1') {
+                        currentRoundScores.push({
+                            name: `Player ${p.id.split('_')[1]}`,
+                            score: p.score,
+                            level: 0
+                        });
+                    }
+                });
+            }
+
+            allTimeScores.push({
+                name: 'You',
+                score: player.score,
+                level: gameState.currentLevel + 1,
+                timestamp: Date.now()
+            });
+            localStorage.setItem('starEaterScores', JSON.stringify(allTimeScores));
+
+            showLeaderboard();
+        }
+
+        function showLeaderboard() {
+            currentRoundScores.sort((a, b) => b.score - a.score);
+            allTimeScores.sort((a, b) => b.score - a.score);
+
+            roundScores.innerHTML = currentRoundScores.map((p, i) => 
+                `<div>${i+1}. ${p.name}: ★${p.score} ${p.level ? '🌠'+p.level : ''}</div>`
+            ).join('');
+
+            alltimeScores.innerHTML = allTimeScores.slice(0, 5).map((p, i) => 
+                `<div>${i+1}. ${p.name}: ★${p.score} 🌠${p.level}</div>`
+            ).join('');
+
+            leaderboard.style.display = 'block';
+        }
+
+        function endGame() {
+            endRound();
+        }
+
+        function getRandomColor() {
+            const colors = ['#FF5252', '#FF4081', '#E040FB', '#7C4DFF', '#536DFE', '#448AFF', '#40C4FF', '#18FFFF', '#64FFDA', '#69F0AE', '#B2FF59', '#EEFF41', '#FFFF00', '#FFD740', '#FFAB40', '#FF6E40'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function getRandomStarColor() {
+            const colors = ['#FFEB3B', '#FFC107', '#FF9800', '#FF5722', '#FF5252', '#FF4081', '#E040FB', '#7C4DFF'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+    </script>
+</body>
+</html>
