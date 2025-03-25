@@ -1,36 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-    document.addEventListener('DOMContentLoaded', function() {
-    // Проверяем, что игра запущена в Telegram
-    if (window.Telegram && Telegram.WebApp) {
-        const tgWebApp = Telegram.WebApp;
-
-        // Развернуть на весь экран
-        tgWebApp.expand();
-
-        // Получаем данные пользователя
-        const user = tgWebApp.initDataUnsafe.user;
-        if (user) {
-            console.log("Пользователь Telegram:", user);
-            // Можно сохранить user.id для таблицы лидеров
-        }
-
-        // Обработка закрытия игры
-        tgWebApp.onEvent('viewportChanged', (event) => {
-            if (event.isStateStable) {
-                console.log("Игра закрывается");
-            }
-        });
-    }
-});
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Star Eater Game</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: Arial; }
-        #game-canvas { display: block; background: #1a1a2e; touch-action: none; }
+        #game-canvas { display: block; background: #0f0c29; touch-action: none; }
         #menu {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             display: flex; flex-direction: column; justify-content: center;
@@ -39,33 +15,69 @@
         }
         .btn {
             padding: 15px 30px; margin: 10px; font-size: 18px;
-            background: #4CAF50; color: white; border: none;
-            border-radius: 5px; cursor: pointer; min-width: 200px;
-            transition: transform 0.2s;
+            background: linear-gradient(45deg, #4CAF50, #2E8B57);
+            color: white; border: none;
+            border-radius: 25px; cursor: pointer; min-width: 200px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
-        .btn:hover { transform: scale(1.05); }
+        .btn:hover { 
+            transform: scale(1.05); 
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        }
         #ui { 
             position: absolute; top: 10px; left: 10px; 
             color: white; text-shadow: 1px 1px 3px black;
             font-size: 18px; font-weight: bold;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 12px;
+            border-radius: 10px;
         }
         #leaderboard {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.9);
             padding: 20px;
-            border-radius: 10px;
+            border-radius: 15px;
             color: white;
             z-index: 101;
             display: none;
             max-width: 80%;
+            border: 2px solid #4CAF50;
+            box-shadow: 0 0 20px rgba(76, 175, 80, 0.5);
         }
-        h1 { color: #4CAF50; margin-bottom: 30px; text-shadow: 0 0 10px rgba(76, 175, 80, 0.7); }
+        h1 { 
+            color: #4CAF50; 
+            margin-bottom: 30px; 
+            text-shadow: 0 0 10px rgba(76, 175, 80, 0.7);
+            font-size: 3em;
+        }
+        .star-bg {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            z-index: -1;
+            overflow: hidden;
+        }
+        .star {
+            position: absolute;
+            background: white;
+            border-radius: 50%;
+            animation: twinkle var(--duration) infinite ease-in-out;
+            opacity: 0;
+        }
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
+    <div class="star-bg" id="star-bg"></div>
     <canvas id="game-canvas"></canvas>
     <div id="ui">
         <div id="score">★ 0</div>
@@ -107,7 +119,35 @@
 
             console.log('All buttons initialized successfully');
             initGameEnvironment();
+            createStarBackground();
         });
+
+        function createStarBackground() {
+            const container = document.getElementById('star-bg');
+            const starCount = 200;
+            
+            for (let i = 0; i < starCount; i++) {
+                const star = document.createElement('div');
+                star.className = 'star';
+                
+                // Random position
+                star.style.left = `${Math.random() * 100}%`;
+                star.style.top = `${Math.random() * 100}%`;
+                
+                // Random size (1-3px)
+                const size = Math.random() * 2 + 1;
+                star.style.width = `${size}px`;
+                star.style.height = `${size}px`;
+                
+                // Random animation duration (2-5s)
+                star.style.setProperty('--duration', `${Math.random() * 3 + 2}s`);
+                
+                // Random delay
+                star.style.animationDelay = `${Math.random() * 5}s`;
+                
+                container.appendChild(star);
+            }
+        }
 
         function startMultiplayer() {
             console.log('Starting multiplayer mode');
@@ -132,7 +172,7 @@
 
         // КОНФИГУРАЦИЯ ИГРЫ
         const config = {
-            roundTime: 5 * 60 * 1000, // 2 минуты
+            roundTime: 5 * 60 * 1000, // 5 минут
             mapSize: { width: 5000, height: 5000 },
             initialPlayerSize: 20,
             foodSize: 8,
@@ -165,7 +205,8 @@
                 startY: 0,
                 moveX: 0,
                 moveY: 0
-            }
+            },
+            backgroundPattern: null
         };
 
         let allTimeScores = JSON.parse(localStorage.getItem('starEaterScores')) || [];
@@ -188,6 +229,36 @@
             resizeCanvas();
             initControls();
             window.addEventListener('resize', resizeCanvas);
+            
+            // Create background pattern
+            const bgCanvas = document.createElement('canvas');
+            bgCanvas.width = 200;
+            bgCanvas.height = 200;
+            const bgCtx = bgCanvas.getContext('2d');
+            
+            // Draw space-like pattern
+            bgCtx.fillStyle = '#0f0c29';
+            bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+            
+            // Add subtle nebula effect
+            const gradient = bgCtx.createRadialGradient(100, 100, 0, 100, 100, 100);
+            gradient.addColorStop(0, 'rgba(31, 28, 71, 0.8)');
+            gradient.addColorStop(1, 'rgba(15, 12, 41, 0.2)');
+            bgCtx.fillStyle = gradient;
+            bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+            
+            // Add tiny stars to pattern
+            for (let i = 0; i < 50; i++) {
+                bgCtx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.2})`;
+                bgCtx.fillRect(
+                    Math.random() * bgCanvas.width,
+                    Math.random() * bgCanvas.height,
+                    Math.random() * 1.5 + 0.5,
+                    Math.random() * 1.5 + 0.5
+                );
+            }
+            
+            gameState.backgroundPattern = ctx.createPattern(bgCanvas, 'repeat');
         }
 
         function initGame(mode) {
@@ -207,7 +278,8 @@
                     startY: 0,
                     moveX: 0,
                     moveY: 0
-                }
+                },
+                backgroundPattern: gameState.backgroundPattern
             };
 
             generateFood(50);
@@ -383,7 +455,7 @@
             checkCollisions();
             
             if (gameState.gameMode === 'multiplayer') {
-                updatePlayersCount(1 + Math.floor(Math.random() * 15));
+                updatePlayersCount(Object.keys(gameState.players).length);
             }
         }
 
@@ -521,8 +593,12 @@
         }
 
         function render() {
-            ctx.fillStyle = '#1a1a2e';
+            // Draw space background with pattern
+            ctx.fillStyle = gameState.backgroundPattern;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw additional space effects
+            drawSpaceEffects();
             
             const player = gameState.players['player1'];
             if (!player) return;
@@ -539,35 +615,10 @@
             });
             
             gameState.bots.forEach(bot => {
-                ctx.beginPath();
-                ctx.arc(bot.x, bot.y, bot.size, 0, Math.PI * 2);
-                ctx.fillStyle = bot.color;
-                ctx.fill();
-                
-                ctx.fillStyle = 'white';
-                ctx.beginPath();
-                ctx.arc(
-                    bot.x - bot.size/3, 
-                    bot.y - bot.size/3, 
-                    bot.size/5, 0, Math.PI * 2
-                );
-                ctx.fill();
+                drawPlayer(bot);
             });
             
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
-            ctx.fillStyle = player.color;
-            ctx.fill();
-            
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(
-                player.x, 
-                player.y + player.size/4, 
-                player.size/2, 0.1 * Math.PI, 0.9 * Math.PI
-            );
-            ctx.stroke();
+            drawPlayer(player);
             
             ctx.restore();
             
@@ -579,6 +630,67 @@
             
             if (gameState.gameMode === 'company') {
                 uiLevel.textContent = `🌠 Level ${gameState.currentLevel + 1}`;
+            }
+        }
+
+        function drawPlayer(player) {
+            // Main body
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+            ctx.fillStyle = player.color;
+            ctx.fill();
+            
+            // Eyes (only for player)
+            if (!player.isBot) {
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(
+                    player.x - player.size/3, 
+                    player.y - player.size/3, 
+                    player.size/5, 0, Math.PI * 2
+                );
+                ctx.fill();
+                
+                // Smile
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(
+                    player.x, 
+                    player.y + player.size/4, 
+                    player.size/2, 0.1 * Math.PI, 0.9 * Math.PI
+                );
+                ctx.stroke();
+            }
+        }
+
+        function drawSpaceEffects() {
+            // Draw distant stars
+            for (let i = 0; i < 50; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                const size = Math.random() * 1.5 + 0.5;
+                const opacity = Math.random() * 0.5 + 0.2;
+                
+                ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+                ctx.fillRect(x, y, size, size);
+            }
+            
+            // Draw nebula effects
+            if (Math.random() < 0.01) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                const radius = Math.random() * 100 + 50;
+                const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+                
+                const hue = Math.floor(Math.random() * 360);
+                gradient.addColorStop(0, `hsla(${hue}, 80%, 60%, 0.3)`);
+                gradient.addColorStop(1, `hsla(${hue}, 80%, 30%, 0)`);
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
             }
         }
 
